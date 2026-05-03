@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --color-neon-orange: #ff5e00;
+}
+
+@layer base {
+  /* Absolutna przezroczystość wymuszona na wszystkich warstwach bazowych */
+  html, body, #root {
+    background-color: transparent !important;
+    @apply m-0 p-0 w-full h-full font-sans overflow-hidden select-none text-slate-800;
+  }
+}

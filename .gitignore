@@ -1,0 +1,11 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Mac/OS
+.DS_Store
+
+# Build/Env
+dist/
+build/
+.env
