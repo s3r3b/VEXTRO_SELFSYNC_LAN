@@ -1,152 +1,146 @@
-import { useEffect, useState } from 'react';
-import { GetSystemStatus, GetActiveNodes } from '../wailsjs/go/main/App';
+import { useState, useEffect, useRef } from 'react';
+import { GetChatHistory, SendChatMessage, GetSystemStatus, GetActiveNodes } from '../wailsjs/go/main/App';
 
-// Deterministyczny generator awatarów na podstawie ID urządzenia
-const generateAvatar = (id: string) => {
-  if (!id || !id.startsWith('VXT-')) return { color: '#333', initials: '??' };
-  
-  const hex = id.replace('VXT-', '');
-  const color = `#${hex.slice(0, 6).padEnd(6, '8')}`;
-  const initials = hex.slice(0, 2).toUpperCase();
-  
-  return { color, initials };
-};
-
-// Struktura węzła odebrana z demona Go
-interface NodeInfo {
-  device_id: string;
-  status: string;
-  port: string;
-  ip: string;
-  last_seen: number;
+// Interfejs zgodny ze strukturą ChatMessage z Daemona (chat.go)
+interface ChatMessage {
+    timestamp: string;
+    senderId: string;
+    content: string;
 }
 
 function App() {
-  const [deviceID, setDeviceID] = useState<string>("ŁĄCZENIE Z RDZENIEM...");
-  const [activeNodes, setActiveNodes] = useState<NodeInfo[]>([]);
+    const [localId, setLocalId] = useState<string>("Łączenie z Daemonem...");
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [input, setInput] = useState("");
+    const chatEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Odpytanie o własny status
-        const resultStatus = await GetSystemStatus();
-        setDeviceID(resultStatus);
-
-        // Odpytanie o inne węzły (Radar)
-        const nodesJsonStr = await GetActiveNodes();
+    // Inicjalizacja i pobranie własnego DeviceID
+    const fetchStatus = async () => {
         try {
-          const parsedNodes = JSON.parse(nodesJsonStr);
-          setActiveNodes(Array.isArray(parsedNodes) ? parsedNodes : []);
+            const res = await GetSystemStatus();
+            setLocalId(res);
         } catch (e) {
-          console.error("Błąd dekodowania radaru JSON:", e);
+            console.error("Błąd połączenia IPC:", e);
         }
-      } catch (err) {
-        setDeviceID("BŁĄD IPC");
-      }
     };
-    
-    fetchData();
-    // Odświeżanie całego interfejsu (i radaru) co 3 sekundy
-    const interval = setInterval(fetchData, 3000);
-    return () => clearInterval(interval);
-  }, []);
 
-  const avatar = generateAvatar(deviceID);
-  const isConnected = deviceID.startsWith('VXT-');
+    // Pobieranie historii czatu (JSON -> Array)
+    const fetchChat = async () => {
+        try {
+            const res = await GetChatHistory();
+            if (res && res !== "[]" && res !== "ERROR") {
+                setMessages(JSON.parse(res));
+            } else if (res === "[]") {
+                setMessages([]);
+            }
+        } catch (e) {
+            console.error("Błąd parsowania czatu:", e);
+        }
+    };
 
-  return (
-    <div className="flex-1 flex flex-row items-stretch justify-center p-8 gap-8 w-full h-full select-none">
-      
-      {/* Lewa Sekcja: Osobista tożsamość */}
-      <div className="flex flex-col items-center justify-center w-full max-w-md gap-10">
+    // Efekt uruchamiany przy starcie
+    useEffect(() => {
+        fetchStatus();
+        fetchChat();
         
-        {/* Nagłówek Typograficzny */}
-        <div className="text-center">
-          <h1 className="text-4xl font-light tracking-[0.4em] text-white/90 mb-2 drop-shadow-lg">VEXTRO</h1>
-          <p className="text-[var(--color-neon-orange)] font-mono text-[10px] uppercase tracking-[0.3em] font-bold">
-            SelfSync LAN Protocol
-          </p>
-        </div>
-        
-        {/* Karta Identyfikacji (Smoked Glass) */}
-        <div className="w-full bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-6 shadow-[0_8px_32px_rgba(0,0,0,0.3)] flex flex-col gap-6 relative overflow-hidden">
-          
-          <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/50 to-transparent"></div>
-          
-          <div className="flex items-center justify-between border-b border-white/10 pb-4">
-            <span className="text-[10px] text-white/60 uppercase tracking-widest font-bold">Tożsamość Węzła</span>
-            <div className="flex items-center gap-2 bg-black/30 px-3 py-1 rounded-full border border-white/10 shadow-inner">
-              <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-[var(--color-neon-orange)] animate-pulse shadow-[0_0_8px_var(--color-neon-orange)]' : 'bg-red-500'}`}></span>
-              <span className="text-[9px] font-mono text-white/80 tracking-wider mt-[1px] font-bold">
-                {isConnected ? 'mDNS BROADCAST' : 'OFFLINE'}
-              </span>
-            </div>
-          </div>
-          
-          {/* Blok Awatara i ID */}
-          <div className="flex items-center gap-5 bg-black/20 p-5 rounded-2xl border border-white/5">
-            <div 
-              className="w-14 h-14 rounded-xl flex items-center justify-center text-xl font-black text-white/90 shadow-lg border border-white/20"
-              style={{ backgroundColor: avatar.color }}
-            >
-              {avatar.initials}
-            </div>
-            
-            <div className="flex flex-col">
-              <span className="text-[9px] font-mono text-white/40 uppercase tracking-widest mb-1">Local Device ID</span>
-              <span className="text-xl font-mono font-bold tracking-widest text-white/90 drop-shadow-md">
-                {deviceID}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
+        // MVP: Polling co 1.5 sekundy dla synchronizacji wiadomości
+        const interval = setInterval(fetchChat, 1500);
+        return () => clearInterval(interval);
+    }, []);
 
-      {/* Prawa Sekcja: Radar mDNS (Topologia) */}
-      <div className="w-full max-w-xs bg-white/5 backdrop-blur-lg border border-white/10 rounded-3xl p-5 shadow-[0_8px_32px_rgba(0,0,0,0.2)] flex flex-col relative overflow-hidden h-[80vh] self-center">
-        
-        <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-4">
-          <span className="text-[10px] text-white/60 uppercase tracking-widest font-bold">Radar LAN (mDNS)</span>
-          <span className="text-[10px] font-mono text-[var(--color-neon-orange)] tracking-wider font-bold">
-            WĘZŁY: {activeNodes.length}
-          </span>
-        </div>
+    // Automatyczne przewijanie do najnowszej wiadomości
+    useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages]);
 
-        {/* Lista Kontaktów */}
-        <div className="flex-1 overflow-y-auto flex flex-col gap-3 custom-scrollbar pr-1">
-          {activeNodes.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-center opacity-40">
-              <div className="w-6 h-6 rounded-full border-2 border-[var(--color-neon-orange)] border-t-transparent animate-spin mb-3"></div>
-              <span className="text-[9px] font-mono text-white uppercase tracking-widest">Skanowanie Sieci...</span>
-            </div>
-          ) : (
-            activeNodes.map((node) => {
-              const nodeAvatar = generateAvatar(node.device_id);
-              return (
-                <div key={node.device_id} className="flex items-center justify-between bg-black/40 p-3 rounded-2xl border border-white/5 hover:bg-black/60 transition-colors cursor-pointer group">
-                  <div className="flex items-center gap-3">
-                    <div 
-                      className="w-10 h-10 rounded-lg flex items-center justify-center text-sm font-black text-white/90 shadow-md border border-white/10 group-hover:scale-105 transition-transform"
-                      style={{ backgroundColor: nodeAvatar.color }}
-                    >
-                      {nodeAvatar.initials}
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-mono font-bold tracking-widest text-white/90">{node.device_id}</span>
-                      <span className="text-[8px] font-mono text-[var(--color-neon-orange)] tracking-widest">{node.ip}</span>
-                    </div>
-                  </div>
-                  <div className="w-2 h-2 rounded-full bg-[var(--color-neon-orange)] shadow-[0_0_8px_var(--color-neon-orange)]"></div>
+    const handleSend = async () => {
+        if (!input.trim()) return;
+        await SendChatMessage(input);
+        setInput("");
+        fetchChat(); // Natychmiastowe odświeżenie po wysłaniu
+    };
+
+    return (
+        <div style={{ 
+            display: 'flex', flexDirection: 'column', height: '100vh', 
+            backgroundColor: '#0f0f11', color: '#e0e0e0', fontFamily: 'system-ui, sans-serif' 
+        }}>
+            {/* GÓRNY PASEK (HEADER) */}
+            <header style={{ 
+                padding: '15px 20px', borderBottom: '1px solid #222', 
+                backgroundColor: '#16161a', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+            }}>
+                <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 600, letterSpacing: '1px' }}>VEXTRO <span style={{color: '#00ffcc'}}>LAN</span></h2>
+                <div style={{ fontSize: '12px', color: '#888', backgroundColor: '#222', padding: '5px 10px', borderRadius: '6px' }}>
+                    ID: <span style={{color: '#fff'}}>{localId}</span>
                 </div>
-              )
-            })
-          )}
+            </header>
+
+            {/* GŁÓWNY PANEL CZATU */}
+            <div style={{ 
+                flex: 1, overflowY: 'auto', padding: '20px', 
+                display: 'flex', flexDirection: 'column', gap: '15px' 
+            }}>
+                {messages.length === 0 ? (
+                    <div style={{ textAlign: 'center', color: '#555', marginTop: '20px' }}>Brak wiadomości w historii LAN.</div>
+                ) : (
+                    messages.map((msg, idx) => {
+                        const isMe = msg.senderId === localId;
+                        return (
+                            <div key={idx} style={{ 
+                                alignSelf: isMe ? 'flex-end' : 'flex-start', 
+                                backgroundColor: isMe ? '#005f99' : '#222226', 
+                                padding: '12px 16px', borderRadius: '12px', 
+                                borderBottomRightRadius: isMe ? '2px' : '12px',
+                                borderBottomLeftRadius: isMe ? '12px' : '2px',
+                                maxWidth: '75%', boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+                            }}>
+                                {!isMe && (
+                                    <div style={{ fontSize: '10px', color: '#00ffcc', marginBottom: '6px', fontWeight: 'bold' }}>
+                                        {msg.senderId}
+                                    </div>
+                                )}
+                                <div style={{ fontSize: '14px', lineHeight: '1.4' }}>{msg.content}</div>
+                                <div style={{ fontSize: '9px', color: isMe ? '#99d6ff' : '#666', marginTop: '6px', textAlign: 'right' }}>
+                                    {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}
+                                </div>
+                            </div>
+                        );
+                    })
+                )}
+                <div ref={chatEndRef} />
+            </div>
+
+            {/* PANEL WPROWADZANIA */}
+            <div style={{ 
+                padding: '20px', borderTop: '1px solid #222', backgroundColor: '#16161a',
+                display: 'flex', gap: '10px'
+            }}>
+                <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                    placeholder="Napisz wiadomość w sieci LAN..."
+                    style={{ 
+                        flex: 1, padding: '14px 20px', borderRadius: '8px', border: '1px solid #333', 
+                        backgroundColor: '#0f0f11', color: 'white', outline: 'none', fontSize: '14px'
+                    }}
+                />
+                <button 
+                    onClick={handleSend} 
+                    style={{ 
+                        padding: '0 25px', borderRadius: '8px', border: 'none', 
+                        backgroundColor: '#00ffcc', color: '#000', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s'
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#00ccaa'}
+                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#00ffcc'}
+                >
+                    WYŚLIJ
+                </button>
+            </div>
         </div>
-
-      </div>
-
-    </div>
-  )
+    );
 }
 
 export default App;

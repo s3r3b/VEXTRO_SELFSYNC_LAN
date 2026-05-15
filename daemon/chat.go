@@ -64,6 +64,32 @@ func GetChatHistory() string {
 		}
 	}
 
+// BroadcastMessage przesyła wiadomość do wszystkich aktywnych węzłów w sieci LAN
+func BroadcastMessage(senderID, content string) {
+	nodes := GetActiveNodes() // Pobiera mapę węzłów z discovery.go
+	payload := fmt.Sprintf("P2P_RELAY_MSG:%s|%s", senderID, content)
+
+	for id, addr := range nodes {
+		if id == LocalDeviceID {
+			continue
+		}
+
+		go func(address string) {
+			// Próba połączenia z innym Daemonem (port 53535)
+			// Uwaga: adres z mDNS zawiera port discovery, musimy użyć portu Daemona
+			host, _, _ := net.SplitHostPort(address)
+			target := net.JoinHostPort(host, DefaultPort)
+
+			conn, err := net.DialTimeout("tcp", target, 2*time.Second)
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			conn.Write([]byte(payload))
+		}(addr)
+	}
+}
+
 	// Pakujemy przetworzoną historię w JSON, by ułatwić życie Frontendowi (R2)
 	jsonBytes, err := json.Marshal(messages)
 	if err != nil {

@@ -16,14 +16,10 @@ const (
 func main() {
 	fmt.Println("[VEXTRO CORE] Uruchamianie sekwencji startowej...")
 
-	// 1. Inicjalizacja bazy danych
 	InitDB()
 	defer CloseDB()
-
-	// 1.5. Inicjalizacja mDNS i Identyfikacji
 	InitDiscovery()
 
-	// 2. Inicjalizacja gniazda TCP
 	listener, err := net.Listen("tcp", ":"+DefaultPort)
 	if err != nil {
 		fmt.Printf("[FATAL] Nie można uruchomić nasłuchu na porcie %s: %v\n", DefaultPort, err)
@@ -33,7 +29,6 @@ func main() {
 
 	fmt.Printf("[VEXTRO CORE] Nasłuch TCP aktywny na porcie %s. Daemon gotowy.\n", DefaultPort)
 
-	// 3. Graceful Shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -48,13 +43,11 @@ func main() {
 	}()
 
 	<-sigChan
-	fmt.Println("\n[VEXTRO CORE] Otrzymano sygnał zamknięcia. Wykonywanie zrzutu pamięci...")
+	fmt.Println("\n[VEXTRO CORE] Otrzymano sygnał zamknięcia...")
 }
 
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
-
-	// Zwiększony bufor, aby obsłużyć strumień tekstowy wiadomości
 	buffer := make([]byte, 8192)
 	n, err := conn.Read(buffer)
 	if err != nil {
@@ -63,38 +56,42 @@ func handleConnection(conn net.Conn) {
 
 	cmd := strings.TrimSpace(string(buffer[:n]))
 
-	// Mikro-router IPC
 	if cmd == "IPC_GET_STATUS" {
-		response := fmt.Sprintf("%s", LocalDeviceID)
-		conn.Write([]byte(response))
+		conn.Write([]byte(LocalDeviceID))
 		return
 	}
 
 	if cmd == "IPC_GET_NODES" {
-		response := GetActiveNodesJSON()
-		conn.Write([]byte(response))
+		conn.Write([]byte(GetActiveNodesJSON()))
 		return
 	}
 
-	// [NOWE] Pobranie historii czatu (zwraca JSON)
 	if cmd == "IPC_GET_CHAT" {
-		response := GetChatHistory()
-		conn.Write([]byte(response))
+		conn.Write([]byte(GetChatHistory()))
 		return
 	}
 
-	// [NOWE] Zapis nowej wiadomości (lokalnie)
+	// OBSŁUGA WYCHODZĄCEJ WIADOMOŚCI (Z UI)
 	if strings.HasPrefix(cmd, "IPC_SEND_MSG:") {
-		msg := strings.TrimPrefix(cmd, "IPC_SEND_MSG:")
-		err := AppendChatMessage(LocalDeviceID, msg)
-		if err != nil {
-			conn.Write([]byte("ERROR"))
-		} else {
-			// W późniejszych krokach: dodamy tutaj broadcast do innych węzłów na LAN
-			conn.Write([]byte("OK"))
+		msgContent := strings.TrimPrefix(cmd, "IPC_SEND_MSG:")
+		// 1. Zapisz lokalnie
+		AppendChatMessage(LocalDeviceID, msgContent)
+		// 2. Roześlij do innych węzłów w LAN [NOWE]
+		go BroadcastMessage(LocalDeviceID, msgContent)
+		conn.Write([]byte("OK"))
+		return
+	}
+
+	// OBSŁUGA PRZYCHODZĄCEJ WIADOMOŚCI (OD INNEGO DAEMONA) [NOWE]
+	if strings.HasPrefix(cmd, "P2P_RELAY_MSG:") {
+		// Format: P2P_RELAY_MSG:SENDER_ID|CONTENT
+		data := strings.TrimPrefix(cmd, "P2P_RELAY_MSG:")
+		parts := strings.SplitN(data, "|", 2)
+		if len(parts) == 2 {
+			AppendChatMessage(parts[0], parts[1])
 		}
 		return
 	}
 
-	fmt.Printf("[VEXTRO CORE] [TX/RX] Nierozpoznany sygnał: %s od: %s\n", cmd, conn.RemoteAddr().String())
+	fmt.Printf("[VEXTRO CORE] [TX/RX] Nierozpoznany sygnał: %s\n", cmd)
 }
