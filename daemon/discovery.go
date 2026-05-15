@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	badger "github.com/dgraph-io/badger/v4"
@@ -17,9 +18,15 @@ type NodeInfo struct {
 	DeviceID string `json:"device_id"`
 	Status   string `json:"status"`
 	Port     string `json:"port"`
+	IP       string `json:"ip"`
+	LastSeen int64  `json:"last_seen"`
 }
 
-var LocalDeviceID string
+var (
+	LocalDeviceID string
+	ActiveNodes   = make(map[string]NodeInfo)
+	nodesMutex    sync.RWMutex
+)
 
 // InitDiscovery inicjalizuje identyfikację urządzenia i uruchamia usługi mDNS w tle
 func InitDiscovery() {
@@ -45,7 +52,6 @@ func getOrGenerateDeviceID() string {
 		return nil
 	})
 
-	// Jeśli klucz nie istnieje (pierwsze uruchomienie), generujemy nowe ID
 	if err == badger.ErrKeyNotFound || devID == "" {
 		bytes := make([]byte, 4)
 		rand.Read(bytes)
@@ -84,14 +90,14 @@ func startMDNSBroadcaster() {
 		Port:     DefaultPort,
 	}
 
-	payload, _ := json.Marshal(info)
-
 	for {
+		// Aktualizujemy payload za każdym razem, aby mieć świeży timestamp (choć nie używamy go w nadajniku)
+		payload, _ := json.Marshal(info)
 		_, err := conn.Write(payload)
 		if err != nil {
 			fmt.Printf("[VEXTRO DISCOVERY] Błąd nadawania mDNS: %v\n", err)
 		}
-		// Wysyłamy puls (Keep-Alive sieciowy) co 5 sekund
+		// Puls mDNS co 5 sekund
 		time.Sleep(5 * time.Second)
 	}
 }
@@ -121,10 +127,43 @@ func startMDNSListener() {
 
 		var receivedNode NodeInfo
 		if err := json.Unmarshal(buffer[:n], &receivedNode); err == nil {
-			// Ignorujemy pakiety od samych siebie
 			if receivedNode.DeviceID != LocalDeviceID {
-				fmt.Printf("[VEXTRO RADAR] Wykryto aktywny węzeł: %s (IP: %s)\n", receivedNode.DeviceID, src.IP.String())
+				receivedNode.IP = src.IP.String()
+				receivedNode.LastSeen = time.Now().Unix()
+
+				nodesMutex.Lock()
+				_, exists := ActiveNodes[receivedNode.DeviceID]
+				ActiveNodes[receivedNode.DeviceID] = receivedNode
+				nodesMutex.Unlock()
+
+				if !exists {
+					fmt.Printf("[VEXTRO RADAR] Węzeł '%s' wszedł do strefy LAN (IP: %s)\n", receivedNode.DeviceID, receivedNode.IP)
+				}
 			}
 		}
 	}
+}
+
+// GetActiveNodesJSON zwraca listę aktywnych węzłów. Odcina te, od których nie było pulsu od ponad 15 sekund.
+func GetActiveNodesJSON() string {
+	nodesMutex.RLock()
+	defer nodesMutex.RUnlock()
+
+	var nodeList []NodeInfo
+	now := time.Now().Unix()
+
+	for _, node := range ActiveNodes {
+		// Timeout: 15 sekund. Jeśli węzeł zniknie z sieci, znika z radaru.
+		if now-node.LastSeen <= 15 {
+			nodeList = append(nodeList, node)
+		}
+	}
+
+	// Jeśli tablica jest pusta, upewniamy się, że zwrócimy [] zamiast null
+	if nodeList == nil {
+		nodeList = make([]NodeInfo, 0)
+	}
+
+	data, _ := json.Marshal(nodeList)
+	return string(data)
 }

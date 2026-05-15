@@ -62,12 +62,18 @@ func handleConnection(conn net.Conn) {
 
 	cmd := strings.TrimSpace(string(buffer[:n]))
 
-	// Mikro-router IPC dla połączeń lokalnych (Frontend Wails <-> Daemon)
+	// Mikro-router IPC
 	if cmd == "IPC_GET_STATUS" {
 		response := fmt.Sprintf("%s", LocalDeviceID)
 		conn.Write([]byte(response))
 		return
 	}
 
-	fmt.Printf("[VEXTRO CORE] [TX/RX] Nierozpoznany sygnał lub payload TCP od: %s\n", conn.RemoteAddr().String())
+	if cmd == "IPC_GET_NODES" {
+		response := GetActiveNodesJSON()
+		conn.Write([]byte(response))
+		return
+	}
+
+	fmt.Printf("[VEXTRO CORE] [TX/RX] Nierozpoznany sygnał: %s od: %s\n", cmd, conn.RemoteAddr().String())
 }
