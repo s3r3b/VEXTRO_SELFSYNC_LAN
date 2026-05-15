@@ -19,6 +19,9 @@ func main() {
 	InitDB()
 	defer CloseDB()
 
+	// 1.5. Inicjalizacja Identyfikacji i Topologii LAN (mDNS)
+	InitDiscovery()
+
 	// 2. Inicjalizacja gniazda TCP
 	listener, err := net.Listen("tcp", ":"+DefaultPort)
 	if err != nil {
