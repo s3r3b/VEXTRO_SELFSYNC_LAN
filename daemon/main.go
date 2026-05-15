@@ -90,7 +90,7 @@ func handleConnection(conn net.Conn) {
 		if err != nil {
 			conn.Write([]byte("ERROR"))
 		} else {
-			// W KROKU 9: dodamy tutaj broadcast do innych węzłów na LAN
+			// W późniejszych krokach: dodamy tutaj broadcast do innych węzłów na LAN
 			conn.Write([]byte("OK"))
 		}
 		return
