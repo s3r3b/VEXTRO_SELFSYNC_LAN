@@ -54,7 +54,8 @@ func main() {
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	buffer := make([]byte, 1024)
+	// Zwiększony bufor, aby obsłużyć strumień tekstowy wiadomości
+	buffer := make([]byte, 8192)
 	n, err := conn.Read(buffer)
 	if err != nil {
 		return
@@ -72,6 +73,26 @@ func handleConnection(conn net.Conn) {
 	if cmd == "IPC_GET_NODES" {
 		response := GetActiveNodesJSON()
 		conn.Write([]byte(response))
+		return
+	}
+
+	// [NOWE] Pobranie historii czatu (zwraca JSON)
+	if cmd == "IPC_GET_CHAT" {
+		response := GetChatHistory()
+		conn.Write([]byte(response))
+		return
+	}
+
+	// [NOWE] Zapis nowej wiadomości (lokalnie)
+	if strings.HasPrefix(cmd, "IPC_SEND_MSG:") {
+		msg := strings.TrimPrefix(cmd, "IPC_SEND_MSG:")
+		err := AppendChatMessage(LocalDeviceID, msg)
+		if err != nil {
+			conn.Write([]byte("ERROR"))
+		} else {
+			// W KROKU 9: dodamy tutaj broadcast do innych węzłów na LAN
+			conn.Write([]byte("OK"))
+		}
 		return
 	}
 
