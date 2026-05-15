@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -15,11 +16,11 @@ const (
 func main() {
 	fmt.Println("[VEXTRO CORE] Uruchamianie sekwencji startowej...")
 
-	// 1. Inicjalizacja bazy danych w dokumentach usera
+	// 1. Inicjalizacja bazy danych
 	InitDB()
 	defer CloseDB()
 
-	// 1.5. Inicjalizacja Identyfikacji i Topologii LAN (mDNS)
+	// 1.5. Inicjalizacja mDNS i Identyfikacji
 	InitDiscovery()
 
 	// 2. Inicjalizacja gniazda TCP
@@ -52,5 +53,21 @@ func main() {
 
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
-	fmt.Printf("[VEXTRO CORE] [TX/RX] Odrzucono/Przyjęto sygnał od: %s\n", conn.RemoteAddr().String())
+
+	buffer := make([]byte, 1024)
+	n, err := conn.Read(buffer)
+	if err != nil {
+		return
+	}
+
+	cmd := strings.TrimSpace(string(buffer[:n]))
+
+	// Mikro-router IPC dla połączeń lokalnych (Frontend Wails <-> Daemon)
+	if cmd == "IPC_GET_STATUS" {
+		response := fmt.Sprintf("%s", LocalDeviceID)
+		conn.Write([]byte(response))
+		return
+	}
+
+	fmt.Printf("[VEXTRO CORE] [TX/RX] Nierozpoznany sygnał lub payload TCP od: %s\n", conn.RemoteAddr().String())
 }
