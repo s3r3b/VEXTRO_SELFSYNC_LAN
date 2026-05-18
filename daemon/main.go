@@ -19,7 +19,7 @@ func main() {
 	InitDB()
 	defer CloseDB()
 	InitDiscovery()
-	InitFileTransfer() // Nasłuch portu transferów 53536 (Krok 11)
+	InitFileTransfer()
 
 	listener, err := net.Listen("tcp", ":"+DefaultPort)
 	if err != nil {
@@ -97,16 +97,18 @@ func handleConnection(conn net.Conn) {
 		return
 	}
 
+	// [ZMODYFIKOWANE] Odbieranie P2P - dodano powiadomienie
 	if strings.HasPrefix(cmd, "P2P_RELAY_MSG:") {
 		data := strings.TrimPrefix(cmd, "P2P_RELAY_MSG:")
 		parts := strings.SplitN(data, "|", 2)
 		if len(parts) == 2 {
 			AppendChatMessage(parts[0], parts[1])
+			// Wyświetlamy powiadomienie o nowej wiadomości
+			NotifyUser("VEXTRO: Nowa wiadomość w LAN", fmt.Sprintf("Od %s: %s", parts[0], parts[1]))
 		}
 		return
 	}
 
-	// [NOWE] Obsługa zdalnego zamknięcia Daemona z poziomu zasobnika UI
 	if cmd == "IPC_SHUTDOWN" {
 		fmt.Println("[VEXTRO CORE] Otrzymano krytyczny sygnał IPC_SHUTDOWN z zasobnika. Zamykanie...")
 		conn.Write([]byte("SHUTTING_DOWN"))
