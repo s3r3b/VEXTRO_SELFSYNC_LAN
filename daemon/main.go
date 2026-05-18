@@ -19,6 +19,7 @@ func main() {
 	InitDB()
 	defer CloseDB()
 	InitDiscovery()
+	InitFileTransfer() // [NOWE] Uruchomienie nasłuchu portu plików 53536
 
 	listener, err := net.Listen("tcp", ":"+DefaultPort)
 	if err != nil {
@@ -27,7 +28,7 @@ func main() {
 	}
 	defer listener.Close()
 
-	fmt.Printf("[VEXTRO CORE] Nasłuch TCP aktywny na porcie %s. Daemon gotowy.\n", DefaultPort)
+	fmt.Printf("[VEXTRO CORE] Nasłuch TCP (IPC/CHAT) aktywny na porcie %s. Daemon gotowy.\n", DefaultPort)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -71,20 +72,33 @@ func handleConnection(conn net.Conn) {
 		return
 	}
 
-	// OBSŁUGA WYCHODZĄCEJ WIADOMOŚCI (Z UI)
 	if strings.HasPrefix(cmd, "IPC_SEND_MSG:") {
 		msgContent := strings.TrimPrefix(cmd, "IPC_SEND_MSG:")
-		// 1. Zapisz lokalnie
 		AppendChatMessage(LocalDeviceID, msgContent)
-		// 2. Roześlij do innych węzłów w LAN [NOWE]
 		go BroadcastMessage(LocalDeviceID, msgContent)
 		conn.Write([]byte("OK"))
 		return
 	}
 
-	// OBSŁUGA PRZYCHODZĄCEJ WIADOMOŚCI (OD INNEGO DAEMONA) [NOWE]
+	// [NOWE] Zlecenie wysyłki pliku od UI (Format: IPC_SEND_FILE:TargetID|/sciezka/do/pliku)
+	if strings.HasPrefix(cmd, "IPC_SEND_FILE:") {
+		data := strings.TrimPrefix(cmd, "IPC_SEND_FILE:")
+		parts := strings.SplitN(data, "|", 2)
+		if len(parts) == 2 {
+			go func() {
+				err := SendFileToNode(parts[0], parts[1])
+				if err != nil {
+					fmt.Printf("[VEXTRO CORE] Błąd transferu: %v\n", err)
+				}
+			}()
+			conn.Write([]byte("TRANSFER_STARTED"))
+		} else {
+			conn.Write([]byte("ERROR_MALFORMED"))
+		}
+		return
+	}
+
 	if strings.HasPrefix(cmd, "P2P_RELAY_MSG:") {
-		// Format: P2P_RELAY_MSG:SENDER_ID|CONTENT
 		data := strings.TrimPrefix(cmd, "P2P_RELAY_MSG:")
 		parts := strings.SplitN(data, "|", 2)
 		if len(parts) == 2 {
