@@ -19,7 +19,7 @@ func main() {
 	InitDB()
 	defer CloseDB()
 	InitDiscovery()
-	InitFileTransfer() // [NOWE] Uruchomienie nasłuchu portu plików 53536
+	InitFileTransfer() // Nasłuch portu transferów 53536 (Krok 11)
 
 	listener, err := net.Listen("tcp", ":"+DefaultPort)
 	if err != nil {
@@ -80,7 +80,6 @@ func handleConnection(conn net.Conn) {
 		return
 	}
 
-	// [NOWE] Zlecenie wysyłki pliku od UI (Format: IPC_SEND_FILE:TargetID|/sciezka/do/pliku)
 	if strings.HasPrefix(cmd, "IPC_SEND_FILE:") {
 		data := strings.TrimPrefix(cmd, "IPC_SEND_FILE:")
 		parts := strings.SplitN(data, "|", 2)
@@ -104,6 +103,14 @@ func handleConnection(conn net.Conn) {
 		if len(parts) == 2 {
 			AppendChatMessage(parts[0], parts[1])
 		}
+		return
+	}
+
+	// [NOWE] Obsługa zdalnego zamknięcia Daemona z poziomu zasobnika UI
+	if cmd == "IPC_SHUTDOWN" {
+		fmt.Println("[VEXTRO CORE] Otrzymano krytyczny sygnał IPC_SHUTDOWN z zasobnika. Zamykanie...")
+		conn.Write([]byte("SHUTTING_DOWN"))
+		os.Exit(0)
 		return
 	}
 
